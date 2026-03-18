@@ -21,7 +21,7 @@ from langchain.tools.retriever import create_retriever_tool
 # Configuration & Initialization
 # -------------------------
 
-# Set your API key here directly
+# Directly set Google API key
 GOOGLE_API_KEY = "AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI"
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
@@ -48,18 +48,22 @@ def build_retriever_tool(uploaded_file):
         # Load and split PDF
         loader = PyPDFLoader(tmp_path)
         documents = loader.load()
-        # ↑ Adjusted: increased chunk size for speed
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=400)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=400)  # Faster indexing
         splits = text_splitter.split_documents(documents)
 
-        # Create vector store using local embeddings
-        vectorstore = FAISS.from_documents(splits, init_embeddings())
+        # Batch embedding all chunks at once for speed
+        embeddings_model = init_embeddings()
+        texts = [doc.page_content for doc in splits]
+        embeddings_list = embeddings_model.embed_documents(texts)  # Precompute embeddings
+
+        # Create FAISS vector store using precomputed embeddings
+        vectorstore = FAISS.from_texts(texts, embeddings_model)
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
         # Clean up temp file
         os.remove(tmp_path)
 
-        # Create retriever tool for the agent
+        # Create retriever tool for agent
         return create_retriever_tool(
             retriever,
             name="curriculum_retriever",
@@ -158,7 +162,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# User input
+# User Input
 if user_query := st.chat_input("Ask a science question..."):
     st.session_state.messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
