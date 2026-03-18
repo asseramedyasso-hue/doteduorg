@@ -17,13 +17,13 @@ from langchain.tools.retriever import create_retriever_tool
 # -------------------------
 # CONFIG (SAFE)
 # -------------------------
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = os.getenv(AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI)
 
-if not GOOGLE_API_KEY:
+if not AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI:
     st.error("❌ API key not found. Set it in environment variables.")
     st.stop()
 
-os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+os.environ[AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI] = AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI
 
 # -------------------------
 # INIT
