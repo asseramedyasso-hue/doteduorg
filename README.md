@@ -2,9 +2,6 @@ import os
 import tempfile
 import streamlit as st
 
-# -------------------------
-# Essential LangChain imports (compatible with your installed versions)
-# -------------------------
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -18,73 +15,76 @@ from langchain.tools import Tool
 from langchain.tools.retriever import create_retriever_tool
 
 # -------------------------
-# Configuration & Initialization
+# CONFIG (SAFE)
 # -------------------------
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Directly set Google API key
-GOOGLE_API_KEY = "AIzaSyAXsx1GaJB7fp4n3oIXNZW7Wch_OunJAYI"
+if not GOOGLE_API_KEY:
+    st.error("❌ API key not found. Set it in environment variables.")
+    st.stop()
+
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
+# -------------------------
+# INIT
+# -------------------------
 def init_llm():
-    """Initialize the Gemini LLM using your API key."""
-    return ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.3)
+    return ChatGoogleGenerativeAI(
+        model="gemini-1.5-pro",
+        temperature=0.3
+    )
 
 def init_embeddings():
-    """Use local embeddings to avoid Google embedding quota issues."""
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return HuggingFaceEmbeddings(
+        model_name="all-MiniLM-L6-v2"
+    )
 
 # -------------------------
-# RAG Setup (PDF Processing)
+# PDF PROCESSING
 # -------------------------
-
 def build_retriever_tool(uploaded_file):
-    """Process PDF locally and create a searchable tool."""
     try:
-        # Save uploaded PDF temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.read())
+            path = tmp.name
 
-        # Load and split PDF
-        loader = PyPDFLoader(tmp_path)
-        documents = loader.load()
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=400)  # Faster indexing
-        splits = text_splitter.split_documents(documents)
+        loader = PyPDFLoader(path)
+        docs = loader.load()
 
-        # Batch embedding all chunks at once for speed
-        embeddings_model = init_embeddings()
-        texts = [doc.page_content for doc in splits]
-        embeddings_list = embeddings_model.embed_documents(texts)  # Precompute embeddings
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000,
+            chunk_overlap=400
+        )
+        splits = splitter.split_documents(docs)
 
-        # Create FAISS vector store using precomputed embeddings
-        vectorstore = FAISS.from_texts(texts, embeddings_model)
+        vectorstore = FAISS.from_documents(
+            splits,
+            init_embeddings()
+        )
+
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-        # Clean up temp file
-        os.remove(tmp_path)
+        os.remove(path)
 
-        # Create retriever tool for agent
         return create_retriever_tool(
             retriever,
             name="curriculum_retriever",
-            description="Search this first for course-specific scientific explanations."
+            description="Use for course-related science questions"
         )
 
     except Exception as e:
-        st.error(f"Error processing PDF: {e}")
+        st.error(f"PDF Error: {e}")
         return None
 
 # -------------------------
-# Streamlit UI Layout
+# UI
 # -------------------------
-
-st.set_page_config(page_title="Socratic Science Tutor", page_icon="🔬", layout="centered")
+st.set_page_config(page_title="Socratic Tutor", layout="centered")
 st.title("🔬 Socratic Science Tutor")
-st.markdown("---")
 
-# Initialize Session States
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationBufferWindowMemory(
         memory_key="chat_history",
@@ -92,88 +92,82 @@ if "memory" not in st.session_state:
         return_messages=True
     )
 
-# Sidebar: PDF Upload
+# Sidebar
 with st.sidebar:
-    st.header("📂 Course Materials")
-    uploaded_file = st.file_uploader("Upload a Science PDF", type="pdf")
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
     if uploaded_file and "retriever_tool" not in st.session_state:
-        with st.spinner("Indexing your course material locally..."):
+        with st.spinner("Processing PDF..."):
             tool = build_retriever_tool(uploaded_file)
             if tool:
                 st.session_state.retriever_tool = tool
-                st.success("PDF Ready!")
+                st.success("Ready!")
 
 # -------------------------
-# Agent & Tools Setup
+# TOOLS
 # -------------------------
-
 search = DuckDuckGoSearchRun()
+
 tools = [
     Tool(
         name="web_search",
         func=search.run,
-        description="Search the web for real-world context and modern applications."
+        description="Search internet"
     )
 ]
 
 if "retriever_tool" in st.session_state:
     tools.append(st.session_state.retriever_tool)
 
+# -------------------------
+# PROMPT
+# -------------------------
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are an elite Socratic science tutor. 
-Your goal is to guide students to understanding, NOT to give direct answers. 
+    ("system", """You are a Socratic tutor.
 
-Format EVERY response strictly into these 3 sections:
+ALWAYS respond in 3 sections:
 
-### 📚 From the Course
-(If a PDF is uploaded, use curriculum_retriever. If not, explain based on general principles.)
-
-### 🌐 Real-World Context
-(Use web_search to find a modern application or discovery.)
-
-### 💡 Simple Analogy
-(Create a simple, relatable analogy using everyday objects.)
-
-Tone: Encouraging and helpful."""),
-
+### 📚 From Course
+### 🌐 Real World
+### 💡 Analogy
+"""),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
-# Initialize Agent
+# -------------------------
+# AGENT
+# -------------------------
 llm = init_llm()
+
 agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(
+
+executor = AgentExecutor(
     agent=agent,
     tools=tools,
     memory=st.session_state.memory,
-    verbose=True,
-    handle_parsing_errors=True
+    verbose=True
 )
 
 # -------------------------
-# Chat Interface
+# CHAT
 # -------------------------
-
-# Display message history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        st.write(msg["content"])
 
-# User Input
-if user_query := st.chat_input("Ask a science question..."):
-    st.session_state.messages.append({"role": "user", "content": user_query})
-    with st.chat_message("user"):
-        st.markdown(user_query)
+if user_input := st.chat_input("Ask..."):
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                result = agent_executor.invoke({"input": user_query})
-                response = result.get("output", "I had trouble generating a response.")
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                res = executor.invoke({"input": user_input})
+                output = res["output"]
+
+                st.write(output)
+                st.session_state.messages.append({"role": "assistant", "content": output})
+
             except Exception as e:
-                st.error(f"Something went wrong: {e}")
+                st.error(e)
